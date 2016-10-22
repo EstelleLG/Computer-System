@@ -1,0 +1,297 @@
+/*
+ *Name: Xinyi Gong
+ *Wustl Key: gongxinyi
+ *ID: 430761
+ *
+ */
+
+#include <stdio.h>
+#include <getopt.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <stdint.h>
+#include "cachelab.h"
+
+
+//each line
+struct line;
+struct set;
+typedef struct line {
+    int valid;
+    int64_t tag;
+    int freq;
+} line;
+
+typedef struct set {
+    unsigned length;     //E
+    unsigned empty;
+    int totalFetch;
+    line** lines;
+} set;
+
+line* createLine() {
+    line* ans = (line*)(malloc(sizeof(line)));
+    ans-> tag = 0;
+    ans-> valid = 0;
+    ans-> freq = 0;
+    return ans;
+}
+
+set* createSet(unsigned l) {
+    set* ans = (set*)(malloc(sizeof(set)));
+    ans-> length = l;
+    ans-> empty = l;
+    ans-> totalFetch = 0;
+    ans-> lines = (line**)malloc(l* sizeof(line*));
+    
+    //initialize
+    for (int i = 0; i < l; i++) {
+  	ans->lines[i] = createLine();
+    }
+        
+    return ans;
+}
+
+typedef struct cache {
+    unsigned setNumber;
+    set** sets;
+} cache;
+
+cache* createCache(unsigned set_number, unsigned e) {
+    cache* ans = (cache*) malloc(sizeof(cache));
+    ans-> setNumber = set_number;
+    ans-> sets = (set**) malloc(set_number* sizeof(set*));   //how many set starting nodes
+    
+    for (int i = 0; i < set_number; i++) {
+    	ans-> sets[i] = createSet(e);     //initialize
+    }
+    return ans;     
+}
+
+int action(int* hit, int* miss, int* eviction, cache* table, char operation, unsigned s, unsigned b, int64_t address) {
+    
+    //printf("%ld\n",address);
+    //unsigned t = 64 - s - b;
+    int hitOrNot = 0;
+    int LRUIndex = 0;
+    //get tag
+    int64_t tag = address >> (s+b); 
+    //get set
+    unsigned sset = (address >> b) & ((1 << s) - 1);
+    //printf("%ld %ld %d \n", address, tag, sset);
+    if (sset < table->setNumber) {
+        //printf("%s %ld\n", "enter for ", address);	
+	set* mappedSet = table->sets[sset];     //pointer to current set
+    	for (int l = 0; l < mappedSet->length; l++) {
+	    line* currentLine = mappedSet->lines[l];             //pointer to each line in this set
+ 	    if ((currentLine->valid == 1) && (currentLine->tag == tag)) {
+	    	//compare tag
+		    (*hit)++;
+ 		    mappedSet->totalFetch += 1;
+		    currentLine->freq = mappedSet->totalFetch;
+		    hitOrNot = 1;
+		    //printf("%c %ld %s\n", operation, address, "hit");
+		    break;
+	    }
+
+	}
+	//if not hit	
+	int LRU = 1<<30;
+	if (hitOrNot == 0) {
+	  //  printf("%s %ld\n", "enter not hit ", address);
+	    //int LRU = (mappedSet->lines[0])->freq;     //default
+	    for (int l = 0; l < mappedSet->length; l++) {
+		line* currentLine = mappedSet->lines[l];
+		if (currentLine-> valid == 0) {
+		    //empty line
+		    (*miss)++;
+		    mappedSet->totalFetch += 1;
+		    currentLine->freq = mappedSet->totalFetch;
+		    currentLine->valid = 1;
+		    currentLine->tag = tag;
+		    //printf("%c %ld %s\n", operation, address, "miss");
+		    break;
+		}	
+		
+		if (currentLine->freq < LRU) {
+		    LRU = currentLine->freq;   //updateLRU
+		    LRUIndex = l;   //update index
+		}	
+
+		//end of this for loop without break;
+		//then eviction
+		if ((l+1) == mappedSet->length) {
+		    (*miss)++;
+		    (*eviction)++;
+		    (mappedSet->lines[LRUIndex])->tag = tag;
+		    mappedSet->totalFetch += 1;
+		    (mappedSet->lines[LRUIndex])->freq = mappedSet->totalFetch;
+		    //printf("%c %ld %s\n", operation, address, "miss enviction"); 		
+		}
+	
+            }
+		
+
+	}
+
+    }
+    
+    if (operation == 'M') {
+	(*hit)++;
+	//printf("%c %ld %s\n", operation, address, "modified hit");
+    }
+    
+    return 0;
+       
+} 
+
+
+
+int main(int argc, char * argv[])
+{
+    //int count = 0;
+    int hit_count = 0, miss_count = 0, eviction_count = 0;
+    int opt = 0, err = 0;
+    int hflag = 0, vflag = 0, sflag = 0, eflag = 0, bflag = 0, tflag = 0;
+    unsigned s=0, e=0, b=0;
+    char * trace_name = "";
+
+    while ((opt = getopt(argc, argv, "hvs:E:b:t:")) != -1) {
+	switch(opt) {
+	    case 'h':
+		hflag = 1;
+		break;
+	    case 'v':
+		vflag = 1;
+		break;
+	    case 's':
+		sflag = 1;
+		s = atoi(optarg);
+		break;
+	    case 'E':
+		eflag = 1;
+		e = atoi(optarg);
+		break;
+	    case 'b':
+		bflag = 1;
+		b = atoi(optarg);
+		break;
+	    case 't':
+		tflag = 1;
+		trace_name = optarg;
+		break;
+	    case '?':
+		err = 1;
+		break;
+
+	}
+    }
+
+    if (sflag == 0) {
+	fprintf(stderr, "%s: missing -s option\n", argv[0]);
+        return 1;
+    }
+
+    else if (eflag == 0) {
+        fprintf(stderr, "%s: missing -E option\n", argv[0]);
+        return 1;
+    }
+    else if (bflag == 0) {
+        fprintf(stderr, "%s: missing -b option\n", argv[0]);
+        return 1;
+    }
+    else if (err) {
+        fprintf(stderr, "%s: error\n", argv[0]);
+        return 1;
+    }
+    else if (tflag == 0) {
+	fprintf(stderr, "%s: fileerror\n", argv[0]);
+    	return 1;
+    }
+  
+    if (hflag || vflag) {
+    	//do nothing now...
+    } 
+
+    //printf("s= %d\n", s);
+   // printf("e= %d\n", e);
+    //printf("b= %d\n", b);
+    printf("tracename = %s\n", trace_name);
+    
+
+    FILE *trace;
+    trace = fopen(trace_name, "r");
+    if (trace == NULL) {
+	fprintf(stderr, "%s:Cannot open input trace\n", argv[0]);
+	return 1;
+    }
+    
+    //create cache
+    unsigned set_number = 1 << s;
+    cache* table = createCache(set_number, e); 
+    
+    char str[255];
+    char instruction;
+    char address[10];
+    while ((fgets(str, 255, trace) !=NULL)) {
+    	//printf("%s\n", str);
+    	//printf("%c\n", str[0]);
+   	if (str[0] == ' ') {
+	    //printf("%s\n", "eeee");
+	    instruction = str[1];
+            //start from 3 to ,   char 
+	    int j = 3;
+	    int index = 0;
+	    address[0] = '\0';
+	    while(str[j] != ',') {
+		if (index < 10) {
+		 	address[index] = str[j];
+			index++;
+			address[index] = '\0';
+			j++;
+		}
+	    }
+	    //printf("%c\n", instruction);
+	    //printf("%s\n", address);
+	    
+
+
+	    int64_t add = 0x0;
+	    char* ptr;
+	    add = strtol(address, &ptr, 16);
+	    //printf("%ld\n", add);
+	    
+	    action(&hit_count, &miss_count, &eviction_count, table, instruction, s, b, add);	
+	  //  count ++;
+	}
+
+
+
+	str[0] = '\0';
+    }
+
+ 
+    //printf("%d %d %d \n", hit_count, miss_count, eviction_count);
+    //free 
+    for (int set = 0; set < table->setNumber; set++) {
+    	//for each pointer to set
+    	for (int l = 0; l < table->sets[set]->length; l++) {
+	    //for each pointer to line
+	    free((table->sets[set])->lines[l]);
+	}
+
+	free((table->sets[set])-> lines);
+
+	free(table->sets[set]);
+    }	
+
+    free(table->sets);
+    free(table);
+    
+    
+    printSummary(hit_count, miss_count, eviction_count);
+    //printf("%d\n", count);
+    return 0;
+    
+}
